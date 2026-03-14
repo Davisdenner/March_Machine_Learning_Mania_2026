@@ -65,7 +65,7 @@ def main():
     games = build_all_games()
     seeds = load_seeds()
     tourney = load_tourney_compact()
-    sample_sub = load_sample_submission(stage=1)
+    sample_sub = load_sample_submission(stage=2)
 
     print(f"   Jogos: {len(games):,}")
     print(f"   Temporadas: {games['Season'].nunique()}")
