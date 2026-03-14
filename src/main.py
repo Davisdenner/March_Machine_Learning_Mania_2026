@@ -1,6 +1,4 @@
 # -*- coding: utf-8 -*-
-"""Pipeline completo: dados → features → treino → ensemble → submissão."""
-
 import sys
 import os
 import warnings
@@ -9,7 +7,7 @@ import pandas as pd
 
 warnings.filterwarnings("ignore")
 
-# Garantir imports
+#garantir imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import SEED, TRAIN_SEASONS_END, VAL_SEASON, OUTPUT_DIR
@@ -40,7 +38,7 @@ from ensemble import EnsemblePredictor
 from submission import generate_submission
 
 
-# Features mais importantes (seleção manual baseada em importância + estabilidade)
+#features mais importantes (seleção manual baseada em importância + estabilidade)
 TOP_FEATURES = [
     "Diff_Seed", "Diff_ELO", "A_Seed", "B_Seed", "A_ELO", "B_ELO",
     "Diff_WinPct", "Diff_SOS", "Diff_NetEff", "Diff_OffEff_mean", "Diff_DefEff_mean",
@@ -60,7 +58,7 @@ def main():
     print(" March Machine Learning Mania 2026")
     print("=" * 60)
 
-    # ── 1. CARREGAR DADOS ──────────────────────────────
+    #1. CARREGAR DADOS
     print("\n Carregando dados...")
     games = build_all_games()
     seeds = load_seeds()
@@ -71,12 +69,12 @@ def main():
     print(f"   Temporadas: {games['Season'].nunique()}")
     print(f"   Torneio: {len(tourney):,} jogos")
 
-    # ── 2. ELO RATINGS ────────────────────────────────
+    #2. ELO RATINGS
     print("\n Calculando ELO Ratings...")
     elo_df = compute_elo_ratings(games)
     print(f"   ELO ratings calculados para {elo_df['TeamID'].nunique()} times")
 
-    # ── 3. FEATURE ENGINEERING ─────────────────────────
+    #3. FEATURE ENGINEERING
     print("\n Engenharia de Features...")
     team_features = compute_season_stats(games)
     tourney_history = compute_tourney_history(tourney)
@@ -85,16 +83,16 @@ def main():
     print(f"   Massey Ordinals: {massey_df.shape[1] - 2} sistemas")
     print(f"   Temporadas com stats: {team_features['Season'].nunique()}")
 
-    # ── 4. DATASET DE CONFRONTOS ──────────────────────
+    #4. DATASET DE CONFRONTOS
     print("\n Construindo dataset de confrontos...")
     train_matchups = build_training_matchups(
         tourney, team_features, seeds, elo_df, tourney_history, massey_df
     )
     all_feature_cols = get_feature_columns(train_matchups)
 
-    # Feature selection: usar apenas top features que existem no dataset
+    #feature selection: usar apenas top features que existem no dataset
     feature_cols = [f for f in TOP_FEATURES if f in all_feature_cols]
-    # Adicionar qualquer Massey restante
+    #adicionar qualquer Massey restante
     for c in all_feature_cols:
         if "Massey" in c and c not in feature_cols:
             feature_cols.append(c)
@@ -102,7 +100,7 @@ def main():
     print(f"   Matchups de treino: {len(train_matchups):,}")
     print(f"   Features totais: {len(all_feature_cols)}, selecionadas: {len(feature_cols)}")
 
-    # ── 5. VALIDAÇÃO TEMPORAL ─────────────────────────
+    #5. VALIDAÇÃO TEMPORAL
     print("\n Validação Temporal...")
     splits = temporal_cv_splits(train_matchups, first_train_end=2014, last_val_season=2024)
     print(f"   Splits de validação: {len(splits)}")
@@ -110,7 +108,7 @@ def main():
     X = train_matchups[feature_cols].values
     y = train_matchups["Result"].values
 
-    # ── 6. TREINAR MODELOS COM CV ─────────────────────
+    #6. TREINAR MODELOS COM CV
     print("\n Treinando modelos...")
 
     model_factories = {
@@ -147,15 +145,15 @@ def main():
     for name, scores in cv_scores.items():
         print(f"   {name}: {np.mean(scores):.5f} (±{np.std(scores):.5f})")
 
-    # ── 7. DETERMINAR PESOS DO ENSEMBLE ───────────────
-    print("\n⚖️ Calculando pesos do ensemble...")
+    #7. DETERMINAR PESOS DO ENSEMBLE
+    print("\nCalculando pesos do ensemble...")
     mean_scores = {name: np.mean(scores) for name, scores in cv_scores.items()}
 
-    # Pesos inversamente proporcionais ao CV score, com LR floor
+    #pesos inversamente proporcionais ao CV score, com LR floor
     inv = {n: 1.0 / s for n, s in mean_scores.items()}
     total_inv = sum(inv.values())
     weights = {n: v / total_inv for n, v in inv.items()}
-    # Garantir LR tenha pelo menos 0.35
+    #garantir LR tenha pelo menos 0.35
     if weights["lr"] < 0.35:
         weights["lr"] = 0.40
         remaining = 0.60
@@ -167,7 +165,7 @@ def main():
     for name, w in weights.items():
         print(f"   {name}: {w:.3f} (CV: {mean_scores[name]:.5f})")
 
-    # ── 8. CALIBRAÇÃO OOF ─────────────────────────────
+    #8. CALIBRAÇÃO OOF
     print("\n Calibrando com previsões Out-of-Fold...")
     oof_mask = np.zeros(len(y), dtype=bool)
     for _, val_idx in splits:
@@ -183,7 +181,7 @@ def main():
     oof_logloss_raw = evaluate_predictions(y_oof_valid, oof_ensemble_valid)
     print(f"   OOF Log Loss raw: {oof_logloss_raw:.5f}")
 
-    # Calibração: só usar se melhorar
+    #calibração: só usar se melhorar
     from sklearn.linear_model import LogisticRegression as LR_Cal
     calibrator = LR_Cal(C=1.0, random_state=SEED)
     calibrator.fit(oof_ensemble_valid.reshape(-1, 1), y_oof_valid)
@@ -193,17 +191,17 @@ def main():
     print(f"   OOF Log Loss calibrado: {oof_logloss_cal:.5f}")
 
     use_calibrator = oof_logloss_cal < oof_logloss_raw
-    print(f"   Usar calibração: {'SIM ✅' if use_calibrator else 'NÃO ❌ (raw é melhor)'}")
+    print(f"   Usar calibração: {'SIM' if use_calibrator else 'NÃO  (raw é melhor)'}")
 
-    # ── 9. TREINAR MODELOS FINAIS ─────────────────────
+    #9. TREINAR MODELOS FINAIS
     print("\n️ Treinando modelos finais (full data)...")
 
-    # Usar TUDO para treino final (incluindo VAL_SEASON)
+    #usar TUDO para treino final (incluindo VAL_SEASON)
     train_mask = train_matchups["Season"] <= VAL_SEASON
     X_train_final = X[train_mask.values]
     y_train_final = y[train_mask.values]
 
-    # Split interno para early stopping
+    #Split interno para early stopping
     from sklearn.model_selection import train_test_split
     X_fit, X_es, y_fit, y_es = train_test_split(
         X_train_final, y_train_final, test_size=0.1, random_state=SEED, stratify=y_train_final
@@ -219,15 +217,15 @@ def main():
             model.fit(X_train_final, y_train_final)
 
         ensemble.add_model(name, model, weight=weights[name])
-        print(f"   ✅ {name} treinado")
+        print(f"{name} treinado")
 
-    # Guardar calibrador só se melhorou
+    #guardar calibrador só se melhorou
     if use_calibrator:
         ensemble.calibrator = calibrator
     else:
         ensemble.calibrator = None
 
-    # ── 10. GERAR SUBMISSÃO ───────────────────────────
+    #10. GERAR SUBMISSÃO
     print("\n Gerando submissão...")
     sub_matchups = build_submission_matchups(
         sample_sub, team_features, seeds, elo_df, tourney_history, massey_df
@@ -238,7 +236,7 @@ def main():
 
     submission = generate_submission(sub_matchups, sub_preds, "submission.csv")
 
-    # ── 11. FEATURE IMPORTANCE ────────────────────────
+    #11. FEATURE IMPORTANCE
     print("\n Top 20 Features (LightGBM):")
     lgb_model = ensemble.models["lgb"]
     importance = pd.DataFrame({

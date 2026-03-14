@@ -1,4 +1,3 @@
-"""Treino de múltiplos modelos."""
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
@@ -9,7 +8,7 @@ import xgboost as xgb
 import catboost as cb
 from config import SEED
 
-
+#====== Treino de múltiplos modelo =======#
 def get_lgb_model(n_estimators: int = 2000) -> lgb.LGBMClassifier:
     return lgb.LGBMClassifier(
         n_estimators=n_estimators,
@@ -70,7 +69,7 @@ def train_model_with_early_stopping(
         y_val: np.ndarray,
         feature_names: list[str] | None = None,
 ):
-    """Treina modelo com early stopping (para GBMs)."""
+    #Treina modelo com early stopping (para GBMs)
     if isinstance(model, lgb.LGBMClassifier):
         model.fit(
             X_train, y_train,
@@ -83,7 +82,7 @@ def train_model_with_early_stopping(
             eval_set=[(X_val, y_val)],
             verbose=False,
         )
-        # XGBoost uses early_stopping_rounds in constructor or fit
+        #XGBoost uses early_stopping_rounds in constructor or fit
         model.set_params(early_stopping_rounds=50)
         model.fit(
             X_train, y_train,
@@ -98,7 +97,7 @@ def train_model_with_early_stopping(
             verbose=0,
         )
     else:
-        # Logistic Regression - sem early stopping
+        #Logistic Regression - sem early stopping
         model.fit(X_train, y_train)
 
     return model

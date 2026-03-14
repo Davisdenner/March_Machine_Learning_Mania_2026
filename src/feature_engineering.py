@@ -1,10 +1,9 @@
-"""Feature engineering avançado: estatísticas por time/temporada."""
 import numpy as np
 import pandas as pd
 from config import ROLLING_WINDOW
 
-
-# ── Helpers ────────────────────────────────────────────
+#===== Feature engineering avançado: estatísticas por time/temporada ======#
+#Helpers
 def _possessions(row, prefix: str) -> float:
     """Estimativa de posses de bola (Dean Oliver)."""
     fga = row.get(f"{prefix}FGA", 0)
@@ -14,17 +13,16 @@ def _possessions(row, prefix: str) -> float:
     return fga - orb + to + 0.475 * fta
 
 
-# ── Estatísticas agregadas por time / temporada ──────
+#======= Estatísticas agregadas por time / temporada ========#
+#calcular estatísticas agregadas por time e temporada
+#usar apenas jogos da temporada regular (IsTourney == False)
 def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
-    """Calcula estatísticas agregadas por time e temporada.
 
-    Usa apenas jogos da temporada regular (IsTourney == False).
-    """
     reg = games[~games["IsTourney"]].copy()
 
     has_detailed = "WFGM" in reg.columns
 
-    # Construir registros por time (um row por time-jogo)
+    #construir registros por time (um row por time-jogo)
     rows = []
     for _, g in reg.iterrows():
         season = g["Season"]
@@ -73,7 +71,7 @@ def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
 
     tg = pd.DataFrame(rows)
 
-    # ── Agregações ──
+    #Agregações
     agg_dict = {
         "Won": ["sum", "count"],
         "Score": "mean",
@@ -115,7 +113,7 @@ def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
 
     stats = stats.reset_index()
 
-    # ── Rolling (últimos N jogos da temporada) ────────
+    #Rolling (últimos N jogos da temporada)
     tg_sorted = tg.sort_values(["Season", "TeamID", "DayNum"])
     rolling = (
         tg_sorted
@@ -133,8 +131,8 @@ def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
 
     stats = stats.merge(rolling, on=["Season", "TeamID"], how="left")
 
-    # ── Strength of Schedule ──────────────────────────
-    # Primeiro: calcular WinPct de cada time
+    #Strength of Schedule
+    #Primeiro: calcular WinPct de cada time
     winpct_map = stats.set_index(["Season", "TeamID"])["WinPct"].to_dict()
 
     def _opp_winpct(row):
@@ -149,7 +147,7 @@ def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
     )
     stats = stats.merge(sos, on=["Season", "TeamID"], how="left")
 
-    # Adjusted efficiency
+    #adjusted efficiency
     if has_detailed:
         off_eff_map = stats.set_index(["Season", "TeamID"]).get("OffEff_mean", pd.Series(dtype=float)).to_dict()
 
@@ -167,9 +165,8 @@ def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
 
     return stats
 
-
+#========== calcular histórico de torneio: vitórias totais por time =============#
 def compute_tourney_history(tourney_results: pd.DataFrame) -> pd.DataFrame:
-    """Calcular histórico de torneio: vitórias totais por time."""
     rows = []
     for _, g in tourney_results.iterrows():
         rows.append({"Season": g["Season"], "TeamID": g["WTeamID"], "TourneyWin": 1})
@@ -177,9 +174,9 @@ def compute_tourney_history(tourney_results: pd.DataFrame) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
 
-    # Histórico acumulado até temporada anterior (evita leak)
+    #histórico acumulado até temporada anterior (evita leak)
     df_sorted = df.sort_values("Season")
-    # Para cada (Season, TeamID), contar vitórias em torneios de temporadas ANTERIORES
+    #para cada (Season, TeamID), contar vitórias em torneios de temporadas ANTERIORES
     cumulative = []
     for (tid,), grp in df.groupby(["TeamID"]):
         yearly = grp.groupby("Season")["TourneyWin"].sum().sort_index()

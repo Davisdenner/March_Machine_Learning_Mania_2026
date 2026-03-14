@@ -34,15 +34,15 @@ def load_conferences():
 
 def load_massey_ordinals() -> pd.DataFrame:
     df = load_csv("MMasseyOrdinals")
-    # Manter apenas os sistemas mais preditivos e o último ranking da temporada
+    #manter apenas os sistemas mais preditivos e o último ranking da temporada
     top_systems = ["POM", "SAG", "MOR", "COL", "DOL"]
     df = df[df["SystemName"].isin(top_systems)]
-    # Pegar o ranking mais recente de cada temporada (maior RankingDayNum)
+    #pegar o ranking mais recente de cada temporada (maior RankingDayNum)
     df = df.sort_values("RankingDayNum").groupby(["Season", "TeamID", "SystemName"]).tail(1)
-    # Pivotar: uma coluna por sistema
+    #pivotar: uma coluna por sistema
     df = df.pivot_table(index=["Season", "TeamID"], columns="SystemName", values="OrdinalRank").reset_index()
     df.columns.name = None
-    # Renomear colunas
+    #renomear colunas
     df = df.rename(columns={s: f"Massey_{s}" for s in top_systems if s in df.columns})
     return df
 

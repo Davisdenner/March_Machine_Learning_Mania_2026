@@ -1,4 +1,3 @@
-"""Ensemble de modelos e calibração de probabilidades."""
 import numpy as np
 import pandas as pd
 from sklearn.calibration import CalibratedClassifierCV
@@ -7,9 +6,9 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import log_loss
 from config import SEED
 
-
+#==== Ensemble de modelos e calibração de probabilidades ====#
+#Ensemble com média ponderada + calibração
 class EnsemblePredictor:
-    """Ensemble com média ponderada + calibração."""
 
     def __init__(self):
         self.models = {}
@@ -20,29 +19,29 @@ class EnsemblePredictor:
         self.models[name] = model
         self.weights[name] = weight
 
+    #previsões individuais de cada modelo
     def predict_proba_raw(self, X: np.ndarray) -> dict[str, np.ndarray]:
-        """Previsões individuais de cada modelo."""
         preds = {}
         for name, model in self.models.items():
             p = model.predict_proba(X)[:, 1]
             preds[name] = p
         return preds
 
+    #média ponderada das previsões
     def predict_proba_ensemble(self, X: np.ndarray) -> np.ndarray:
-        """Média ponderada das previsões."""
         preds = self.predict_proba_raw(X)
         total_weight = sum(self.weights[n] for n in preds)
         ensemble = sum(preds[n] * self.weights[n] for n in preds) / total_weight
         return ensemble
 
+    #ajustar Platt Scaling nos resíduos do ensemble
     def fit_calibrator(self, X_val: np.ndarray, y_val: np.ndarray):
-        """Ajustar Platt Scaling nos resíduos do ensemble."""
         raw_preds = self.predict_proba_ensemble(X_val).reshape(-1, 1)
         self.calibrator = LogisticRegression(C=1.0, random_state=SEED)
         self.calibrator.fit(raw_preds, y_val)
 
+    #previsão calibrada final
     def predict_calibrated(self, X: np.ndarray) -> np.ndarray:
-        """Previsão calibrada final."""
         raw = self.predict_proba_ensemble(X).reshape(-1, 1)
         if self.calibrator is not None:
             calibrated = self.calibrator.predict_proba(raw)[:, 1]
@@ -50,9 +49,8 @@ class EnsemblePredictor:
             calibrated = raw.flatten()
         return np.clip(calibrated, 0.01, 0.99)
 
-
+#=== Stacking: usar previsões dos modelos base como features para meta-learner ======#
 class StackingEnsemble:
-    """Stacking: usa previsões dos modelos base como features para meta-learner."""
 
     def __init__(self):
         self.base_models = {}

@@ -1,8 +1,8 @@
-#sistema de ELO rating dinâmico com reset suave entre temporadas
 import numpy as np
 import pandas as pd
 from config import ELO_INITIAL, ELO_K, ELO_HOME_ADVANTAGE
 
+#sistema de ELO rating dinâmico com reset suave entre temporadas
 def expected_score(elo_a: float, elo_b:float):
     return 1.0 / (1.0 + 10 ** ((elo_b - elo_a) / 400.0))
 
@@ -16,13 +16,12 @@ def update_elo(winner_elo:float, loser_elo:float, k:float = ELO_K, mov: int= 0,)
 
     return winner_elo + shift, loser_elo - shift
 
+#==== calcular o ELO para todos os times em todas as temporadas ========#
+#retornar o df: Season, TeamID, ELO (valor ao final da temporada regular)
+#também retornar um dict season -> {teamid: elo} para uso downstream
 def compute_elo_ratings(games: pd.DataFrame) -> pd.DataFrame:
-    """Calcula ELO para todos os times em todas as temporadas.
 
-    Retorna DataFrame: Season, TeamID, ELO (valor ao final da temporada regular).
-    Também retorna um dict season→{teamid: elo} para uso downstream.
-    """
-    elos: dict[int, float] = {}  # teamid -> current elo
+    elos: dict[int, float] = {}  #teamid -> current elo
     season_elos: list[dict] = []
 
     prev_season = None
@@ -30,12 +29,12 @@ def compute_elo_ratings(games: pd.DataFrame) -> pd.DataFrame:
     for _, row in games.iterrows():
         season = row["Season"]
 
-        # Reset suave entre temporadas: regride 1/3 ao mean
+        #reset suave entre temporadas: regride 1/3 ao mean
         if prev_season is not None and season != prev_season:
-            # Salvar ELOs do final da temporada anterior
+            #salvar ELOs do final da temporada anterior
             for tid, elo in elos.items():
                 season_elos.append({"Season": prev_season, "TeamID": tid, "ELO": elo})
-            # Regressão ao mean
+            #regressão ao mean
             for tid in elos:
                 elos[tid] = elos[tid] * 0.75 + ELO_INITIAL * 0.25
 
@@ -50,7 +49,7 @@ def compute_elo_ratings(games: pd.DataFrame) -> pd.DataFrame:
         w_elo = elos.get(w_id, ELO_INITIAL)
         l_elo = elos.get(l_id, ELO_INITIAL)
 
-        # Home-court adjustment para cálculo (não permanente)
+        #Home-court adjustment para cálculo (não permanente)
         loc = row.get("WLoc", "N")
         if loc == "H":
             w_elo_adj = w_elo + ELO_HOME_ADVANTAGE
@@ -60,19 +59,19 @@ def compute_elo_ratings(games: pd.DataFrame) -> pd.DataFrame:
             w_elo_adj = w_elo
 
         new_w, new_l = update_elo(w_elo_adj, l_elo, mov=mov)
-        # Remap adjustment back
+        #Remap adjustment back
         elos[w_id] = new_w - (w_elo_adj - w_elo)
         elos[l_id] = new_l
 
-    # Salvar última temporada
+    #salvar última temporada
     for tid, elo in elos.items():
         season_elos.append({"Season": prev_season, "TeamID": tid, "ELO": elo})
 
     return pd.DataFrame(season_elos)
 
-
+#==== retornar ELO de cada time ANTES de cada jogo (para rolling features) ========#
 def compute_elo_per_game(games: pd.DataFrame) -> pd.DataFrame:
-    """Retorna ELO de cada time ANTES de cada jogo (para rolling features)."""
+
     elos: dict[int, float] = {}
     records = []
     prev_season = None

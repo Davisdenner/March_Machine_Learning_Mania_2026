@@ -1,34 +1,23 @@
-"""Simulação Monte Carlo do torneio NCAA."""
+
 import numpy as np
 import pandas as pd
 from config import SEED
 
-
+#======== Simulação Monte Carlo do torneio NCAA ========#
 def simulate_tournament(
         bracket: list[list[int]],
         prob_matrix: dict[tuple[int, int], float],
         n_simulations: int = 10000,
         rng_seed: int = SEED,
 ) -> pd.DataFrame:
-    """Simula o torneio N vezes usando as probabilidades previstas.
 
-    Args:
-        bracket: Lista de rounds, cada round é uma lista de TeamIDs
-                 ordenados por posição no bracket.
-        prob_matrix: Dict (teamA, teamB) -> P(teamA wins).
-                     teamA < teamB.
-        n_simulations: Número de simulações.
-
-    Returns:
-        DataFrame com TeamID, RoundReached counts, Championship probability.
-    """
     rng = np.random.RandomState(rng_seed)
 
     n_teams = len(bracket[0]) if bracket else 0
-    advancement_counts = {tid: np.zeros(7) for tid in bracket[0]}  # até 6 rounds
+    advancement_counts = {tid: np.zeros(7) for tid in bracket[0]}  #até 6 rounds
 
     for _ in range(n_simulations):
-        current_round = list(bracket[0])  # cópia
+        current_round = list(bracket[0])  #cópia
 
         round_num = 0
         while len(current_round) > 1:
@@ -56,7 +45,7 @@ def simulate_tournament(
 
             current_round = next_round
 
-    # Resumo
+    #resumo
     records = []
     for tid, counts in advancement_counts.items():
         rec = {"TeamID": tid}
@@ -67,9 +56,9 @@ def simulate_tournament(
 
     return pd.DataFrame(records).sort_values("Championship_Pct", ascending=False)
 
-
+#======== construir um dicionário de probabilidades a partir do submission ========#
 def build_prob_matrix(submission_df: pd.DataFrame) -> dict[tuple[int, int], float]:
-    """Constrói dicionário de probabilidades a partir do submission."""
+
     prob_matrix = {}
     for _, row in submission_df.iterrows():
         parts = row["ID"].split("_")

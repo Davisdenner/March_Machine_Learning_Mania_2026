@@ -1,23 +1,16 @@
-"""Validação temporal para evitar data leakage."""
 import numpy as np
 import pandas as pd
 from sklearn.metrics import log_loss
 
-
+#======== Validação temporal para evitar data leakage =======#
+#gerar splits de validação temporal expandindo a janela de treino
 def temporal_cv_splits(
         df: pd.DataFrame,
         first_train_end: int = 2014,
         last_val_season: int = 2024,
         min_train_seasons: int = 5,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
-    """Gera splits de validação temporal expandindo a janela de treino.
 
-    Exemplo:
-        Train 2003-2014, Val 2015
-        Train 2003-2015, Val 2016
-        ...
-        Train 2003-2023, Val 2024
-    """
     seasons = sorted(df["Season"].unique())
     splits = []
 
@@ -33,15 +26,15 @@ def temporal_cv_splits(
         train_idx = df[train_mask].index.values
         val_idx = df[val_mask].index.values
 
-        # Checar mínimo
+        #checar mínimo
         n_train_seasons = df.loc[train_idx, "Season"].nunique()
         if n_train_seasons >= min_train_seasons:
             splits.append((train_idx, val_idx))
 
     return splits
 
-
+#calcular Log Loss com clipping para segurança
 def evaluate_predictions(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """Calcula Log Loss com clipping para segurança."""
+
     y_pred = np.clip(y_pred, 1e-6, 1 - 1e-6)
     return log_loss(y_true, y_pred)
