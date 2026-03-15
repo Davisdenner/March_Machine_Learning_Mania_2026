@@ -32,6 +32,10 @@ from model_training import (
     get_xgb_model,
     get_catboost_model,
     get_lr_model,
+    get_lgb_model_tuned,
+    get_catboost_model_tuned,
+    optimize_lgb,
+    optimize_catboost,
     train_model_with_early_stopping,
 )
 from ensemble import EnsemblePredictor
@@ -108,14 +112,25 @@ def main():
     X = train_matchups[feature_cols].values
     y = train_matchups["Result"].values
 
-    #6. TREINAR MODELOS COM CV
+    # ── 6. OPTUNA — otimização de hiperparâmetros ─────────────────
+    print("\n Otimizando hiperparâmetros com Optuna...")
+    first_train_idx, first_val_idx = splits[0]
+    X_opt_train = X[first_train_idx]
+    y_opt_train = y[first_train_idx]
+    X_opt_val   = X[first_val_idx]
+    y_opt_val   = y[first_val_idx]
+
+    lgb_best_params = optimize_lgb(X_opt_train, y_opt_train, X_opt_val, y_opt_val, n_trials=30)
+    cat_best_params = optimize_catboost(X_opt_train, y_opt_train, X_opt_val, y_opt_val, n_trials=30)
+
+    #7. TREINAR MODELOS COM CV
     print("\n Treinando modelos...")
 
     model_factories = {
-        "lgb": get_lgb_model,
+        "lgb": lambda: get_lgb_model_tuned(lgb_best_params),
         "xgb": get_xgb_model,
-        "cat": get_catboost_model,
-        "lr": get_lr_model,
+        "cat": lambda: get_catboost_model_tuned(cat_best_params),
+        "lr":  get_lr_model,
     }
 
     cv_scores = {name: [] for name in model_factories}
@@ -145,7 +160,7 @@ def main():
     for name, scores in cv_scores.items():
         print(f"   {name}: {np.mean(scores):.5f} (±{np.std(scores):.5f})")
 
-    #7. DETERMINAR PESOS DO ENSEMBLE
+    #8. DETERMINAR PESOS DO ENSEMBLE
     print("\nCalculando pesos do ensemble...")
     mean_scores = {name: np.mean(scores) for name, scores in cv_scores.items()}
 
@@ -165,7 +180,7 @@ def main():
     for name, w in weights.items():
         print(f"   {name}: {w:.3f} (CV: {mean_scores[name]:.5f})")
 
-    #8. CALIBRAÇÃO OOF
+    #9. CALIBRAÇÃO OOF
     print("\n Calibrando com previsões Out-of-Fold...")
     oof_mask = np.zeros(len(y), dtype=bool)
     for _, val_idx in splits:
@@ -193,7 +208,7 @@ def main():
     use_calibrator = oof_logloss_cal < oof_logloss_raw
     print(f"   Usar calibração: {'SIM' if use_calibrator else 'NÃO  (raw é melhor)'}")
 
-    #9. TREINAR MODELOS FINAIS
+    #10. TREINAR MODELOS FINAIS
     print("\n️ Treinando modelos finais (full data)...")
 
     #usar TUDO para treino final (incluindo VAL_SEASON)
@@ -225,7 +240,7 @@ def main():
     else:
         ensemble.calibrator = None
 
-    #10. GERAR SUBMISSÃO
+    #11. GERAR SUBMISSÃO
     print("\n Gerando submissão...")
     sub_matchups = build_submission_matchups(
         sample_sub, team_features, seeds, elo_df, tourney_history, massey_df
@@ -236,7 +251,7 @@ def main():
 
     submission = generate_submission(sub_matchups, sub_preds, "submission.csv")
 
-    #11. FEATURE IMPORTANCE
+    #12. FEATURE IMPORTANCE
     print("\n Top 20 Features (LightGBM):")
     lgb_model = ensemble.models["lgb"]
     importance = pd.DataFrame({
