@@ -38,8 +38,10 @@ from model_training import (
     optimize_catboost,
     train_model_with_early_stopping,
 )
-from ensemble import EnsemblePredictor
+from ensemble import EnsemblePredictor, StackingEnsemble
 from submission import generate_submission
+from sklearn.linear_model import LogisticRegression as LR_Cal
+from sklearn.model_selection import train_test_split
 
 
 #features mais importantes (seleção manual baseada em importância + estabilidade)
@@ -101,9 +103,7 @@ def main():
     )
     all_feature_cols = get_feature_columns(train_matchups)
 
-    #feature selection: usar apenas top features que existem no dataset
     feature_cols = [f for f in TOP_FEATURES if f in all_feature_cols]
-    #adicionar qualquer Massey restante
     for c in all_feature_cols:
         if "Massey" in c and c not in feature_cols:
             feature_cols.append(c)
@@ -119,7 +119,7 @@ def main():
     X = train_matchups[feature_cols].values
     y = train_matchups["Result"].values
 
-    # ── 6. OPTUNA — otimização de hiperparâmetros ─────────────────
+    #6. OPTUNA
     print("\n Otimizando hiperparâmetros com Optuna...")
     first_train_idx, first_val_idx = splits[0]
     X_opt_train = X[first_train_idx]
@@ -130,7 +130,7 @@ def main():
     lgb_best_params = optimize_lgb(X_opt_train, y_opt_train, X_opt_val, y_opt_val, n_trials=30)
     cat_best_params = optimize_catboost(X_opt_train, y_opt_train, X_opt_val, y_opt_val, n_trials=30)
 
-    #7. TREINAR MODELOS COM CV
+    #7. TREINAR MODELOS COM CV — coleta previsões OOF para stacking
     print("\n Treinando modelos...")
 
     model_factories = {
@@ -141,7 +141,7 @@ def main():
     }
 
     cv_scores = {name: [] for name in model_factories}
-    cv_preds = {name: np.zeros(len(y)) for name in model_factories}
+    cv_preds  = {name: np.zeros(len(y)) for name in model_factories}
 
     for fold_idx, (train_idx, val_idx) in enumerate(splits):
         X_tr, X_val = X[train_idx], X[val_idx]
@@ -167,15 +167,12 @@ def main():
     for name, scores in cv_scores.items():
         print(f"   {name}: {np.mean(scores):.5f} (±{np.std(scores):.5f})")
 
-    #8. DETERMINAR PESOS DO ENSEMBLE
+    #8. PESOS BLENDING
     print("\nCalculando pesos do ensemble...")
     mean_scores = {name: np.mean(scores) for name, scores in cv_scores.items()}
-
-    #pesos inversamente proporcionais ao CV score, com LR floor
     inv = {n: 1.0 / s for n, s in mean_scores.items()}
     total_inv = sum(inv.values())
     weights = {n: v / total_inv for n, v in inv.items()}
-    #garantir LR tenha pelo menos 0.35
     if weights["lr"] < 0.35:
         weights["lr"] = 0.40
         remaining = 0.60
@@ -183,89 +180,115 @@ def main():
         ot = sum(others.values())
         for n in others:
             weights[n] = others[n] / ot * remaining
-
     for name, w in weights.items():
         print(f"   {name}: {w:.3f} (CV: {mean_scores[name]:.5f})")
 
-    #9. CALIBRAÇÃO OOF
-    print("\n Calibrando com previsões Out-of-Fold...")
+    #9. STACKING — meta-modelo treinado nas previsões OOF
+    print("\n Treinando meta-modelo (Stacking)...")
     oof_mask = np.zeros(len(y), dtype=bool)
     for _, val_idx in splits:
         oof_mask[val_idx] = True
 
-    oof_ensemble = np.zeros(len(y))
-    for name, w in weights.items():
-        oof_ensemble += cv_preds[name] * w
+    #matriz OOF: cada coluna = previsões OOF de um modelo base
+    oof_meta_X = np.column_stack([cv_preds[name] for name in model_factories])
+    oof_meta_X_valid = oof_meta_X[oof_mask]
+    oof_meta_y_valid = y[oof_mask]
 
-    oof_ensemble_valid = oof_ensemble[oof_mask]
-    y_oof_valid = y[oof_mask]
+    #meta-modelo LR aprende como combinar os modelos base
+    meta_model = LR_Cal(C=1.0, max_iter=1000, random_state=SEED)
+    meta_model.fit(oof_meta_X_valid, oof_meta_y_valid)
 
-    oof_logloss_raw = evaluate_predictions(y_oof_valid, oof_ensemble_valid)
-    print(f"   OOF Log Loss raw: {oof_logloss_raw:.5f}")
+    #comparar stacking vs blending
+    stacking_preds = meta_model.predict_proba(oof_meta_X_valid)[:, 1]
+    stacking_logloss = evaluate_predictions(oof_meta_y_valid, stacking_preds)
 
-    #calibração: só usar se melhorar
-    from sklearn.linear_model import LogisticRegression as LR_Cal
+    blend_preds = sum(cv_preds[name][oof_mask] * weights[name] for name in model_factories)
+    blend_logloss = evaluate_predictions(oof_meta_y_valid, blend_preds)
+
+    print(f"   Stacking OOF Log Loss: {stacking_logloss:.5f}")
+    print(f"   Blending OOF Log Loss: {blend_logloss:.5f}")
+    use_stacking = stacking_logloss < blend_logloss
+    print(f"   Usar stacking: {'SIM ' if use_stacking else 'NÃO ❌ (blending é melhor)'}")
+
+    if use_stacking:
+        print("   Pesos aprendidos pelo meta-modelo:")
+        for name, coef in zip(model_factories.keys(), meta_model.coef_[0]):
+            print(f"      {name}: {coef:.4f}")
+
+    #10. CALIBRAÇÃO
+    print("\n Calibrando...")
+    best_oof = stacking_preds if use_stacking else blend_preds
+    best_logloss = stacking_logloss if use_stacking else blend_logloss
+
     calibrator = LR_Cal(C=1.0, random_state=SEED)
-    calibrator.fit(oof_ensemble_valid.reshape(-1, 1), y_oof_valid)
+    calibrator.fit(best_oof.reshape(-1, 1), oof_meta_y_valid)
+    cal_preds = calibrator.predict_proba(best_oof.reshape(-1, 1))[:, 1]
+    cal_logloss = evaluate_predictions(oof_meta_y_valid, cal_preds)
 
-    oof_calibrated = calibrator.predict_proba(oof_ensemble_valid.reshape(-1, 1))[:, 1]
-    oof_logloss_cal = evaluate_predictions(y_oof_valid, oof_calibrated)
-    print(f"   OOF Log Loss calibrado: {oof_logloss_cal:.5f}")
+    print(f"   OOF Log Loss raw:       {best_logloss:.5f}")
+    print(f"   OOF Log Loss calibrado: {cal_logloss:.5f}")
+    use_calibrator = cal_logloss < best_logloss
+    print(f"   Usar calibração: {'SIM ' if use_calibrator else 'NÃO ❌ (raw é melhor)'}")
 
-    use_calibrator = oof_logloss_cal < oof_logloss_raw
-    print(f"   Usar calibração: {'SIM' if use_calibrator else 'NÃO  (raw é melhor)'}")
+    #11. TREINAR MODELOS FINAIS
+    print("\n Treinando modelos finais (full data)...")
 
-    #10. TREINAR MODELOS FINAIS
-    print("\n️ Treinando modelos finais (full data)...")
-
-    #usar TUDO para treino final (incluindo VAL_SEASON)
     train_mask = train_matchups["Season"] <= VAL_SEASON
     X_train_final = X[train_mask.values]
     y_train_final = y[train_mask.values]
 
-    #Split interno para early stopping
-    from sklearn.model_selection import train_test_split
     X_fit, X_es, y_fit, y_es = train_test_split(
-        X_train_final, y_train_final, test_size=0.1, random_state=SEED, stratify=y_train_final
+        X_train_final, y_train_final, test_size=0.1,
+        random_state=SEED, stratify=y_train_final
     )
 
-    ensemble = EnsemblePredictor()
-
+    final_models = {}
     for name, factory in model_factories.items():
         model = factory()
         if name != "lr":
             model = train_model_with_early_stopping(model, X_fit, y_fit, X_es, y_es)
         else:
             model.fit(X_train_final, y_train_final)
+        final_models[name] = model
+        print(f"   {name} treinado")
 
-        ensemble.add_model(name, model, weight=weights[name])
-        print(f"{name} treinado")
-
-    #guardar calibrador só se melhorou
-    if use_calibrator:
-        ensemble.calibrator = calibrator
-    else:
-        ensemble.calibrator = None
-
-    #11. GERAR SUBMISSÃO
+    #12. GERAR SUBMISSÃO
     print("\n Gerando submissão...")
     sub_matchups = build_submission_matchups(
         sample_sub, team_features, seeds, elo_df, tourney_history, massey_df
     )
-
     sub_X = sub_matchups[feature_cols].values
-    sub_preds = ensemble.predict_calibrated(sub_X)
 
+    #previsões dos modelos base
+    sub_base_preds = np.column_stack([
+        final_models[name].predict_proba(sub_X)[:, 1]
+        for name in model_factories
+    ])
+
+    #combinar via stacking ou blending
+    if use_stacking:
+        sub_preds = meta_model.predict_proba(sub_base_preds)[:, 1]
+        print("   Combinação: Stacking")
+    else:
+        sub_preds = np.zeros(len(sub_X))
+        for name in model_factories:
+            sub_preds += final_models[name].predict_proba(sub_X)[:, 1] * weights[name]
+        print("   Combinação: Blending")
+
+    if use_calibrator:
+        sub_preds = calibrator.predict_proba(sub_preds.reshape(-1, 1))[:, 1]
+        print("   Calibração: SIM")
+
+    sub_preds = np.clip(sub_preds, 0.025, 0.975)
     submission = generate_submission(sub_matchups, sub_preds, "submission.csv")
 
-    #12. FEATURE IMPORTANCE
+    #13. FEATURE IMPORTANCE
     print("\n Top 20 Features (LightGBM):")
-    lgb_model = ensemble.models["lgb"]
+    lgb_model = final_models["lgb"]
     importance = pd.DataFrame({
         "Feature": feature_cols,
         "Importance": lgb_model.feature_importances_,
     }).sort_values("Importance", ascending=False).head(20)
-
     for _, row in importance.iterrows():
         print(f"   {row['Feature']:40s} {row['Importance']:>6.0f}")
 
@@ -273,8 +296,8 @@ def main():
     print(" Pipeline concluído com sucesso!")
     print("=" * 60)
 
-    return submission, ensemble
+    return submission, final_models
 
 
 if __name__ == "__main__":
-    submission, ensemble = main()
+    submission, models = main()
