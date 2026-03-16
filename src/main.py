@@ -19,8 +19,8 @@ from data_loading import (
     load_sample_submission,
     load_massey_ordinals,
 )
-from elo_rating import compute_elo_ratings
-from feature_engineering import compute_season_stats, compute_tourney_history
+from elo_rating import compute_elo_ratings, compute_elo_per_game
+from feature_engineering import compute_season_stats, compute_tourney_history, compute_elo_pre_tourney
 from dataset_builder import (
     build_training_matchups,
     build_submission_matchups,
@@ -45,6 +45,7 @@ from submission import generate_submission
 #features mais importantes (seleção manual baseada em importância + estabilidade)
 TOP_FEATURES = [
     "Diff_Seed", "Diff_ELO", "A_Seed", "B_Seed", "A_ELO", "B_ELO",
+    "Diff_ELO_PreTourney", "A_ELO_PreTourney", "B_ELO_PreTourney",
     "Diff_WinPct", "Diff_SOS", "Diff_NetEff", "Diff_OffEff_mean", "Diff_DefEff_mean",
     "Diff_Rolling_WinPct", "Diff_Rolling_ScoreDiff",
     "Diff_HistTourneyWins", "A_HistTourneyWins", "B_HistTourneyWins",
@@ -78,9 +79,15 @@ def main():
     elo_df = compute_elo_ratings(games)
     print(f"   ELO ratings calculados para {elo_df['TeamID'].nunique()} times")
 
+    elo_per_game = compute_elo_per_game(games)
+    elo_pre_tourney = compute_elo_pre_tourney(elo_per_game)
+    print(f"   ELO pré-torneio calculado para {elo_pre_tourney['TeamID'].nunique()} times")
+
     #3. FEATURE ENGINEERING
     print("\n Engenharia de Features...")
     team_features = compute_season_stats(games)
+    team_features = team_features.merge(elo_pre_tourney, on=["Season", "TeamID"], how="left")
+    print(f"   ELO_PreTourney integrado ao team_features")
     tourney_history = compute_tourney_history(tourney)
     massey_df = load_massey_ordinals()
     print(f"   Features por time: {team_features.shape[1]} colunas")

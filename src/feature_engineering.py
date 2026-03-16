@@ -14,8 +14,6 @@ def _possessions(row, prefix: str) -> float:
 
 
 #======= Estatísticas agregadas por time / temporada ========#
-#calcular estatísticas agregadas por time e temporada
-#usar apenas jogos da temporada regular (IsTourney == False)
 def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
 
     reg = games[~games["IsTourney"]].copy()
@@ -132,7 +130,6 @@ def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
     stats = stats.merge(rolling, on=["Season", "TeamID"], how="left")
 
     #Strength of Schedule
-    #Primeiro: calcular WinPct de cada time
     winpct_map = stats.set_index(["Season", "TeamID"])["WinPct"].to_dict()
 
     def _opp_winpct(row):
@@ -165,6 +162,35 @@ def compute_season_stats(games: pd.DataFrame) -> pd.DataFrame:
 
     return stats
 
+
+#=========== extrai o ELO de cada time no último jogo da temporada regular =======#
+def compute_elo_pre_tourney(elo_per_game: pd.DataFrame) -> pd.DataFrame:
+
+    reg = elo_per_game[elo_per_game["DayNum"] < 132].copy()
+
+    rows = []
+    for _, g in reg.iterrows():
+        season = g["Season"]
+        rows.append({"Season": season, "TeamID": g["WTeamID"],
+                     "DayNum": g["DayNum"], "ELO_pre": g["W_ELO_pre"]})
+        rows.append({"Season": season, "TeamID": g["LTeamID"],
+                     "DayNum": g["DayNum"], "ELO_pre": g["L_ELO_pre"]})
+
+    df = pd.DataFrame(rows)
+
+    #pegar o ELO do último jogo da temporada regular para cada time
+    df_last = (
+        df.sort_values("DayNum")
+        .groupby(["Season", "TeamID"])
+        .last()
+        .reset_index()
+        [["Season", "TeamID", "ELO_pre"]]
+        .rename(columns={"ELO_pre": "ELO_PreTourney"})
+    )
+
+    return df_last
+
+
 #========== calcular histórico de torneio: vitórias totais por time =============#
 def compute_tourney_history(tourney_results: pd.DataFrame) -> pd.DataFrame:
     rows = []
@@ -174,9 +200,7 @@ def compute_tourney_history(tourney_results: pd.DataFrame) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
 
-    #histórico acumulado até temporada anterior (evita leak)
     df_sorted = df.sort_values("Season")
-    #para cada (Season, TeamID), contar vitórias em torneios de temporadas ANTERIORES
     cumulative = []
     for (tid,), grp in df.groupby(["TeamID"]):
         yearly = grp.groupby("Season")["TourneyWin"].sum().sort_index()
