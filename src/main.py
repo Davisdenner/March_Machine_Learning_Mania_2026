@@ -208,7 +208,7 @@ def main():
     print(f"   Stacking OOF Log Loss: {stacking_logloss:.5f}")
     print(f"   Blending OOF Log Loss: {blend_logloss:.5f}")
     use_stacking = stacking_logloss < blend_logloss
-    print(f"   Usar stacking: {'SIM ' if use_stacking else 'NÃO ❌ (blending é melhor)'}")
+    print(f"   Usar stacking: {'SIM ' if use_stacking else 'NÃO  (blending é melhor)'}")
 
     if use_stacking:
         print("   Pesos aprendidos pelo meta-modelo:")
@@ -228,7 +228,7 @@ def main():
     print(f"   OOF Log Loss raw:       {best_logloss:.5f}")
     print(f"   OOF Log Loss calibrado: {cal_logloss:.5f}")
     use_calibrator = cal_logloss < best_logloss
-    print(f"   Usar calibração: {'SIM ' if use_calibrator else 'NÃO ❌ (raw é melhor)'}")
+    print(f"   Usar calibração: {'SIM ' if use_calibrator else 'NÃO  (raw é melhor)'}")
 
     #11. TREINAR MODELOS FINAIS
     print("\n Treinando modelos finais (full data)...")
