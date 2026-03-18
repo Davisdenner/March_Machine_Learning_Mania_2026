@@ -15,7 +15,7 @@ try:
     OPTUNA_AVAILABLE = True
 except ImportError:
     OPTUNA_AVAILABLE = False
-    print("   Optuna não instalado. Rode: pip install optuna")
+    print("   optuna não instalado")
 
 
 #====== Modelos com hiperparâmetros padrão =======#
