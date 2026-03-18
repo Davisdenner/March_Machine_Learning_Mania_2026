@@ -3,7 +3,8 @@ import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import Pipeline
-from sklearn.metrics import log_loss
+from sklearn.metrics import brier_score_loss
+from sklearn.ensemble import RandomForestClassifier
 import lightgbm as lgb
 import xgboost as xgb
 import catboost as cb
@@ -47,7 +48,7 @@ def get_xgb_model(n_estimators: int = 2000) -> xgb.XGBClassifier:
         reg_alpha=1.0,
         reg_lambda=5.0,
         random_state=SEED,
-        eval_metric="logloss",
+        eval_metric="rmse",
         verbosity=0,
         use_label_encoder=False,
     )
@@ -72,7 +73,21 @@ def get_lr_model() -> Pipeline:
     ])
 
 
-#====== Optuna - otimização de hiperparâmetros =======#
+def get_rf_model() -> Pipeline:
+    return Pipeline([
+        ("scaler", StandardScaler()),
+        ("rf", RandomForestClassifier(
+            n_estimators=500,
+            max_depth=6,
+            min_samples_leaf=20,
+            max_features="sqrt",
+            random_state=SEED,
+            n_jobs=-1,
+        )),
+    ])
+
+
+#====== Optuna — otimização de hiperparâmetros =======#
 
 def optimize_lgb(X_train, y_train, X_val, y_val, n_trials: int = 30) -> dict:
 
@@ -101,11 +116,11 @@ def optimize_lgb(X_train, y_train, X_val, y_val, n_trials: int = 30) -> dict:
             callbacks=[lgb.early_stopping(50), lgb.log_evaluation(0)],
         )
         preds = model.predict_proba(X_val)[:, 1]
-        return log_loss(y_val, preds)
+        return brier_score_loss(y_val, preds)
 
     study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=SEED))
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-    print(f"   LGB melhor Log Loss Optuna: {study.best_value:.5f} | params: {study.best_params}")
+    print(f"   LGB melhor Brier Score Optuna: {study.best_value:.5f} | params: {study.best_params}")
     return study.best_params
 
 #otimizar hiperparâmetros do CatBoost com Optuna
@@ -135,11 +150,11 @@ def optimize_catboost(X_train, y_train, X_val, y_val, n_trials: int = 30) -> dic
             verbose=0,
         )
         preds = model.predict_proba(X_val)[:, 1]
-        return log_loss(y_val, preds)
+        return brier_score_loss(y_val, preds)
 
     study = optuna.create_study(direction="minimize", sampler=optuna.samplers.TPESampler(seed=SEED))
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
-    print(f"   CAT melhor Log Loss Optuna: {study.best_value:.5f} | params: {study.best_params}")
+    print(f"   CAT melhor Brier Score Optuna: {study.best_value:.5f} | params: {study.best_params}")
     return study.best_params
 
 #retornar LGB com hiperparâmetros otimizados pelo Optuna
@@ -187,7 +202,7 @@ def train_model_with_early_stopping(
         y_val: np.ndarray,
         feature_names: list[str] | None = None,
 ):
-    """Treina modelo com early stopping (para GBMs)."""
+    #Treinar modelo com early stopping (para GBMs)
     if isinstance(model, lgb.LGBMClassifier):
         model.fit(
             X_train, y_train,

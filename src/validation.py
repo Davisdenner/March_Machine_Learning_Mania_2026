@@ -1,6 +1,6 @@
 import numpy as np
 import pandas as pd
-from sklearn.metrics import log_loss
+from sklearn.metrics import brier_score_loss
 
 #======== Validação temporal para evitar data leakage =======#
 #gerar splits de validação temporal expandindo a janela de treino
@@ -33,8 +33,7 @@ def temporal_cv_splits(
 
     return splits
 
-#calcular Log Loss com clipping para segurança
+#calcular Brier Score — métrica oficial da competição
 def evaluate_predictions(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-
     y_pred = np.clip(y_pred, 1e-6, 1 - 1e-6)
-    return log_loss(y_true, y_pred)
+    return brier_score_loss(y_true, y_pred)
